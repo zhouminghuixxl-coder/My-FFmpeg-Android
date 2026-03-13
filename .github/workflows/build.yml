@@ -1,7 +1,7 @@
 name: Build Full FFmpeg Android Binary
 
 on:
-  workflow_dispatch: # 允许你在网页上通过按钮手动触发编译
+  workflow_dispatch:
 
 jobs:
   build:
@@ -19,27 +19,25 @@ jobs:
         with:
           ndk-version: r26b
 
-      - name: 3. 火力全开：编译所有依赖库并生成 ffmpeg
+      - name: 3. 火力全开：编译依赖库并生成 ffmpeg
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          # 核心魔法：强制生成可执行文件，并开启 GPL 和 Non-free 协议限制的库
+          # 【修复1】补充 SDK 环境变量，这是脚本运行必须的
+          ANDROID_SDK_HOME: ${{ env.ANDROID_HOME }}
           EXTRA_BUILD_CONFIGURATION_FLAGS: "--enable-ffmpeg --enable-gpl --enable-nonfree --enable-static --disable-shared"
         run: |
-          # 给予脚本执行权限
           chmod +x ffmpeg-android-maker.sh
           
-          # 【这里是加料区】: -x264 -x265 -vpx -opus -mp3lame -fdk-aac 就是你要加的库
-          # -macs=arm64-v8a 表示只编译当前绝大多数手机用的 64 位架构，节省时间
-          ./ffmpeg-android-maker.sh -android=24 -macs=arm64-v8a -x264 -x265 -vpx -opus -mp3lame -fdk-aac
+          # 【修复2和3】修改了架构参数为 -abis，去掉了原版脚本不支持的 fdk-aac
+          ./ffmpeg-android-maker.sh -android=24 -abis=arm64-v8a -x264 -x265 -vpx -opus -mp3lame
 
       - name: 4. 提取生成的二进制文件
         run: |
           mkdir -p release_bin
-          # 自动去编译缓存里找出 ffmpeg 可执行文件并复制出来
           find build -name "ffmpeg" -type f -executable -exec cp {} release_bin/ \;
 
       - name: 5. 上传产物供你下载
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-android-arm64
-          path: release_bin/ffmpeg
+          path: release_bin/
