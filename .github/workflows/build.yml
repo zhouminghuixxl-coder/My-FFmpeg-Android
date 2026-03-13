@@ -1,0 +1,45 @@
+name: Build Full FFmpeg Android Binary
+
+on:
+  workflow_dispatch: # 允许你在网页上通过按钮手动触发编译
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. 拉取最强 Android 编译脚本
+        uses: actions/checkout@v4
+        with:
+          repository: Javernaut/ffmpeg-android-maker
+          ref: master
+
+      - name: 2. 配置 NDK (Android 底层开发工具包)
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
+
+      - name: 3. 火力全开：编译所有依赖库并生成 ffmpeg
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          # 核心魔法：强制生成可执行文件，并开启 GPL 和 Non-free 协议限制的库
+          EXTRA_BUILD_CONFIGURATION_FLAGS: "--enable-ffmpeg --enable-gpl --enable-nonfree --enable-static --disable-shared"
+        run: |
+          # 给予脚本执行权限
+          chmod +x ffmpeg-android-maker.sh
+          
+          # 【这里是加料区】: -x264 -x265 -vpx -opus -mp3lame -fdk-aac 就是你要加的库
+          # -macs=arm64-v8a 表示只编译当前绝大多数手机用的 64 位架构，节省时间
+          ./ffmpeg-android-maker.sh -android=24 -macs=arm64-v8a -x264 -x265 -vpx -opus -mp3lame -fdk-aac
+
+      - name: 4. 提取生成的二进制文件
+        run: |
+          mkdir -p release_bin
+          # 自动去编译缓存里找出 ffmpeg 可执行文件并复制出来
+          find build -name "ffmpeg" -type f -executable -exec cp {} release_bin/ \;
+
+      - name: 5. 上传产物供你下载
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-android-arm64
+          path: release_bin/ffmpeg
