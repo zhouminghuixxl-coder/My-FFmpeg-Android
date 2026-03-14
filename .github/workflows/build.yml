@@ -1,9 +1,7 @@
 name: Build FFmpeg for Android (arm64)
 
 on:
-  workflow_dispatch:        # 手动触发
-  push:
-    branches: [ main ]      # 也可以设置自动触发
+  workflow_dispatch:
 
 jobs:
   build:
@@ -28,34 +26,79 @@ jobs:
         run: |
           git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg_src
           cd ffmpeg_src
-          git checkout n7.0          # 选择稳定版本，也可用 master
+          git checkout n7.0
+
+      # 编译依赖库：x264, x265, mp3lame, opus, vpx
+      - name: Build dependencies
+        run: |
+          export PATH=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+          export SYSROOT=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/sysroot
+          export PREFIX=$PWD/ffmpeg_src/android_libs
+
+          # 通用编译参数
+          COMMON_OPTIONS="--host=aarch64-linux-android --target=android --prefix=$PREFIX --disable-shared --enable-static --cross-prefix=aarch64-linux-android- CC=clang CXX=clang++ AR=llvm-ar RANLIB=llvm-ranlib NM=llvm-nm"
+
+          mkdir -p $PREFIX
+
+          # 编译 x264
+          git clone --depth 1 https://code.videolan.org/videolan/x264.git
+          cd x264
+          ./configure $COMMON_OPTIONS --enable-pic --disable-cli
+          make -j$(nproc) && make install
+          cd ..
+
+          # 编译 x265 (需要 cmake)
+          git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git
+          cd x265_git/source
+          cmake -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DCMAKE_INSTALL_PREFIX=$PREFIX -DENABLE_SHARED=OFF .
+          make -j$(nproc) && make install
+          cd ../..
+
+          # 编译 lame (mp3)
+          wget -q https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz
+          tar xzf lame-3.100.tar.gz
+          cd lame-3.100
+          ./configure $COMMON_OPTIONS --enable-nasm
+          make -j$(nproc) && make install
+          cd ..
+
+          # 编译 opus
+          wget -q https://archive.mozilla.org/pub/opus/opus-1.4.tar.gz
+          tar xzf opus-1.4.tar.gz
+          cd opus-1.4
+          ./configure $COMMON_OPTIONS --disable-extra-programs
+          make -j$(nproc) && make install
+          cd ..
+
+          # 编译 vpx
+          git clone --depth 1 https://chromium.googlesource.com/webm/libvpx
+          cd libvpx
+          ./configure --target=arm64-android-gcc --prefix=$PREFIX --disable-examples --disable-unit-tests --enable-pic --enable-static --disable-shared
+          make -j$(nproc) && make install
+          cd ..
 
       - name: Configure and build FFmpeg
         run: |
           export PATH=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+          export SYSROOT=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/sysroot
+          export PKG_CONFIG_PATH=$PWD/ffmpeg_src/android_libs/lib/pkgconfig
+
           cd ffmpeg_src
 
-          # 设置编译工具链
-          export AR=llvm-ar
-          export CC=aarch64-linux-android21-clang
-          export AS=$CC
-          export CXX=aarch64-linux-android21-clang++
-          export LD=ld
-          export RANLIB=llvm-ranlib
-          export STRIP=llvm-strip
-
-          # 配置编译选项（全功能静态版本）
           ./configure \
             --target-os=android \
             --arch=arm64 \
             --cross-prefix=aarch64-linux-android- \
-            --cc=$CC \
-            --cxx=$CXX \
-            --ar=$AR \
-            --ranlib=$RANLIB \
-            --strip=$STRIP \
+            --cc=aarch64-linux-android21-clang \
+            --cxx=aarch64-linux-android21-clang++ \
+            --ar=llvm-ar \
+            --ranlib=llvm-ranlib \
+            --nm=llvm-nm \
+            --strip=llvm-strip \
             --enable-cross-compile \
-            --sysroot=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/sysroot \
+            --sysroot=$SYSROOT \
+            --extra-cflags="-I$PWD/android_libs/include -fPIC -DANDROID" \
+            --extra-ldflags="-L$PWD/android_libs/lib" \
             --disable-asm \
             --disable-doc \
             --disable-debug \
@@ -68,19 +111,13 @@ jobs:
             --enable-libx264 \
             --enable-libx265 \
             --enable-libmp3lame \
-            --enable-libvorbis \
             --enable-libopus \
             --enable-libvpx \
-            --enable-libaom \
-            --enable-libdav1d \
             --enable-jni \
             --enable-mediacodec \
             --enable-pthreads \
-            --enable-version3 \
-            --extra-cflags="-fPIC -DANDROID" \
-            --extra-ldflags="-Wl,-z,stack-size=2097152"
+            --enable-version3
 
-          # 编译（使用所有 CPU 核心）
           make -j$(nproc)
           make install
 
