@@ -15,13 +15,13 @@ jobs:
           sudo sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
           sudo sed -i "s@http://.*security.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
           sudo apt update -y
-          sudo apt install -y wget curl git make cmake ninja-build pkg-config python3 python3-pip unzip autoconf automake libtool
+          sudo apt install -y wget curl git make cmake ninja-build pkg-config python3 python3-pip unzip autoconf automake libtool bzip2
           # pip换清华源
           pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
       
-      - name: 3. 下载Android NDK（Google官方地址，云端高速下载）
+      - name: 3. 下载Android NDK，配置全局环境变量
         run: |
-          # 先定义当前shell可用的变量，同时写入全局环境变量
+          # 定义全局路径变量
           CURRENT_DIR=$(pwd)
           NDK_PATH="${CURRENT_DIR}/android-ndk-r25c"
           ANDROID_API=24
@@ -29,24 +29,24 @@ jobs:
           OUTPUT_DIR="${CURRENT_DIR}/output"
           BUILD_DIR="${CURRENT_DIR}/build"
           
-          # 下载并解压NDK，增加超时和重试
+          # 下载并解压NDK
           wget -t 5 --timeout=30 -O android-ndk-r25c-linux.zip https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
           unzip -q android-ndk-r25c-linux.zip
           
-          # 写入全局环境变量，给后续步骤使用
+          # 写入全局环境变量，后续步骤直接使用
           echo "CURRENT_DIR=${CURRENT_DIR}" >> $GITHUB_ENV
           echo "NDK_PATH=${NDK_PATH}" >> $GITHUB_ENV
           echo "ANDROID_API=${ANDROID_API}" >> $GITHUB_ENV
           echo "TARGET_ARCH=${TARGET_ARCH}" >> $GITHUB_ENV
           echo "OUTPUT_DIR=${OUTPUT_DIR}" >> $GITHUB_ENV
           echo "BUILD_DIR=${BUILD_DIR}" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${BUILD_DIR}/lib/pkgconfig" >> $GITHUB_ENV
           
-          # 提前创建所需目录，避免后续报错
+          # 提前创建所需目录
           mkdir -p ${OUTPUT_DIR}
           mkdir -p ${BUILD_DIR}/lib/pkgconfig
-          echo "PKG_CONFIG_PATH=${BUILD_DIR}/lib/pkgconfig" >> $GITHUB_ENV
 
-      - name: 4. 配置交叉编译工具链全局变量
+      - name: 4. 配置交叉编译工具链变量
         run: |
           TOOLCHAIN="${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64"
           echo "TOOLCHAIN=${TOOLCHAIN}" >> $GITHUB_ENV
@@ -57,10 +57,14 @@ jobs:
           echo "RANLIB=${TOOLCHAIN}/bin/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=${TOOLCHAIN}/bin/llvm-strip" >> $GITHUB_ENV
 
-      - name: 5. 编译x264（H.264编码，清华镜像）
+      - name: 5. 编译x264（H.264编码，源码包直下，无git依赖）
         run: |
-          git clone --depth 1 --retry 5 --timeout=30 https://mirrors.tuna.tsinghua.edu.cn/git/videolan/x264.git
-          cd x264
+          # 下载源码压缩包，解压
+          wget -t 5 --timeout=30 -O x264.tar.gz https://code.videolan.org/videolan/x264/-/archive/master/x264-master.tar.gz
+          tar -zxf x264.tar.gz
+          cd x264-master
+          
+          # 配置并编译
           ./configure \
             --host=${TARGET_ARCH} \
             --cross-prefix=${TOOLCHAIN}/bin/llvm- \
@@ -77,10 +81,14 @@ jobs:
           make install
           cd ..
 
-      - name: 6. 编译x265（H.265编码，Gitee国内镜像）
+      - name: 6. 编译x265（H.265编码，源码包直下，无git依赖）
         run: |
-          git clone --depth 1 --retry 5 --timeout=30 https://gitee.com/mirrors_multicoreware/x265_git.git
-          cd x265_git/build/linux
+          # 下载源码压缩包，解压
+          wget -t 5 --timeout=30 -O x265.tar.gz https://bitbucket.org/multicoreware/x265_git/get/master.tar.gz
+          tar -zxf x265.tar.gz
+          cd multicoreware-x265_git-*/build/linux
+          
+          # 配置并编译
           cmake -G "Unix Makefiles" ../../source \
             -DCMAKE_SYSTEM_NAME=Android \
             -DCMAKE_ANDROID_API=${ANDROID_API} \
@@ -97,10 +105,14 @@ jobs:
           make install
           cd ../../..
 
-      - name: 7. 编译fdk-aac（高清音频编码，Gitee国内镜像）
+      - name: 7. 编译fdk-aac（高清音频编码，源码包直下，无git依赖）
         run: |
-          git clone --depth 1 --retry 5 --timeout=30 https://gitee.com/mirrors/fdk-aac.git
-          cd fdk-aac
+          # 下载稳定版源码包，解压
+          wget -t 5 --timeout=30 -O fdk-aac.tar.gz https://github.com/mstorsjo/fdk-aac/archive/refs/tags/v2.0.3.tar.gz
+          tar -zxf fdk-aac.tar.gz
+          cd fdk-aac-2.0.3
+          
+          # 生成配置文件，编译
           ./autogen.sh
           ./configure \
             --host=${TARGET_ARCH} \
@@ -112,11 +124,14 @@ jobs:
           make install
           cd ..
 
-      - name: 8. 编译openssl（网络/加密支持，清华镜像）
+      - name: 8. 编译openssl（网络/加密支持，清华镜像源码包）
         run: |
+          # 下载源码包，解压
           wget -t 5 --timeout=30 -O openssl.tar.gz https://mirrors.tuna.tsinghua.edu.cn/openssl/source/openssl-3.3.2.tar.gz
           tar -zxf openssl.tar.gz
           cd openssl-3.3.2
+          
+          # 配置并编译
           ./Configure android-arm64 \
             -D__ANDROID_API__=${ANDROID_API} \
             --prefix=${BUILD_DIR} \
@@ -127,10 +142,14 @@ jobs:
           make install_sw
           cd ..
 
-      - name: 9. 编译FFmpeg主程序（清华镜像，全功能集成）
+      - name: 9. 编译FFmpeg主程序（清华镜像源码包，全功能集成）
         run: |
-          git clone --depth 1 --retry 5 --timeout=30 https://mirrors.tuna.tsinghua.edu.cn/git/ffmpeg/ffmpeg.git
-          cd ffmpeg
+          # 下载FFmpeg源码包，解压
+          wget -t 5 --timeout=30 -O ffmpeg.tar.bz2 https://mirrors.tuna.tsinghua.edu.cn/ffmpeg/releases/ffmpeg-snapshot.tar.bz2
+          tar -jxf ffmpeg.tar.bz2
+          cd ffmpeg-*
+          
+          # 全功能配置编译
           ./configure \
             --prefix=${OUTPUT_DIR} \
             --target-os=android \
