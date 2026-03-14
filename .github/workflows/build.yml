@@ -57,7 +57,7 @@ jobs:
           echo "RANLIB=${TOOLCHAIN}/bin/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=${TOOLCHAIN}/bin/llvm-strip" >> $GITHUB_ENV
 
-      - name: 5. 编译x264（H.264编码，源码包直下，无git依赖）
+      - name: 5. 编译x264（H.264编码，官方稳定源码）
         run: |
           # 下载源码压缩包，解压
           wget -t 5 --timeout=30 -O x264.tar.gz https://code.videolan.org/videolan/x264/-/archive/master/x264-master.tar.gz
@@ -81,12 +81,12 @@ jobs:
           make install
           cd ..
 
-      - name: 6. 编译x265（H.265编码，Gitee国内镜像，解决404问题）
+      - name: 6. 编译x265（H.265编码，官方稳定发布版，永久有效地址）
         run: |
-          # 下载Gitee国内镜像源码包，解压
-          wget -t 5 --timeout=30 -O x265.tar.gz https://gitee.com/mirrors_multicoreware/x265_git/repository/archive/master.tar.gz
+          # 下载官方稳定发布版源码包，地址固定不会失效
+          wget -t 5 --timeout=30 -O x265.tar.gz https://bitbucket.org/multicoreware/x265_git/downloads/x265_3.5.tar.gz
           tar -zxf x265.tar.gz
-          cd x265_git-master/build/linux
+          cd x265_3.5/build/linux
           
           # 配置并编译
           cmake -G "Unix Makefiles" ../../source \
@@ -105,7 +105,7 @@ jobs:
           make install
           cd ../../..
 
-      - name: 7. 编译fdk-aac（高清音频编码，稳定版源码包）
+      - name: 7. 编译fdk-aac（高清音频编码，官方稳定版）
         run: |
           # 下载稳定版源码包，解压
           wget -t 5 --timeout=30 -O fdk-aac.tar.gz https://github.com/mstorsjo/fdk-aac/archive/refs/tags/v2.0.3.tar.gz
@@ -124,7 +124,7 @@ jobs:
           make install
           cd ..
 
-      - name: 8. 编译openssl（网络/加密支持，清华镜像源码包）
+      - name: 8. 编译openssl（网络/加密支持，清华镜像稳定版）
         run: |
           # 下载源码包，解压
           wget -t 5 --timeout=30 -O openssl.tar.gz https://mirrors.tuna.tsinghua.edu.cn/openssl/source/openssl-3.3.2.tar.gz
