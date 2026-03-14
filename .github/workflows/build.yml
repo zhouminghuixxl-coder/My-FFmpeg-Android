@@ -10,12 +10,16 @@ jobs:
       - name: 1. 检出代码
         uses: actions/checkout@v4
 
-      - name: 2. 安装系统基础依赖
+      - name: 2. 替换系统源为清华镜像，安装基础依赖
         run: |
+          sudo sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
+          sudo sed -i "s@http://.*security.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
           sudo apt update -y
           sudo apt install -y wget curl git make cmake ninja-build pkg-config python3 python3-pip unzip autoconf automake libtool
+          # pip换清华源
+          pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
       
-      - name: 3. 下载Android NDK（官方地址，云端极速下载）
+      - name: 3. 下载Android NDK（Google官方地址，云端高速下载）
         run: |
           # 先定义当前shell可用的变量，同时写入全局环境变量
           CURRENT_DIR=$(pwd)
@@ -23,21 +27,24 @@ jobs:
           ANDROID_API=24
           TARGET_ARCH=aarch64-linux-android
           OUTPUT_DIR="${CURRENT_DIR}/output"
+          BUILD_DIR="${CURRENT_DIR}/build"
           
-          # 下载并解压NDK
-          wget -t 5 -O android-ndk-r25c-linux.zip https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+          # 下载并解压NDK，增加超时和重试
+          wget -t 5 --timeout=30 -O android-ndk-r25c-linux.zip https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
           unzip -q android-ndk-r25c-linux.zip
           
           # 写入全局环境变量，给后续步骤使用
+          echo "CURRENT_DIR=${CURRENT_DIR}" >> $GITHUB_ENV
           echo "NDK_PATH=${NDK_PATH}" >> $GITHUB_ENV
           echo "ANDROID_API=${ANDROID_API}" >> $GITHUB_ENV
           echo "TARGET_ARCH=${TARGET_ARCH}" >> $GITHUB_ENV
           echo "OUTPUT_DIR=${OUTPUT_DIR}" >> $GITHUB_ENV
+          echo "BUILD_DIR=${BUILD_DIR}" >> $GITHUB_ENV
           
-          # 创建输出目录，变量已在当前shell定义，不会为空
+          # 提前创建所需目录，避免后续报错
           mkdir -p ${OUTPUT_DIR}
-          mkdir -p ${CURRENT_DIR}/build/lib/pkgconfig
-          echo "PKG_CONFIG_PATH=${CURRENT_DIR}/build/lib/pkgconfig" >> $GITHUB_ENV
+          mkdir -p ${BUILD_DIR}/lib/pkgconfig
+          echo "PKG_CONFIG_PATH=${BUILD_DIR}/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: 4. 配置交叉编译工具链全局变量
         run: |
@@ -50,15 +57,15 @@ jobs:
           echo "RANLIB=${TOOLCHAIN}/bin/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=${TOOLCHAIN}/bin/llvm-strip" >> $GITHUB_ENV
 
-      - name: 5. 编译x264（H.264编码）
+      - name: 5. 编译x264（H.264编码，清华镜像）
         run: |
-          git clone --depth 1 --retry 5 https://code.videolan.org/videolan/x264.git
+          git clone --depth 1 --retry 5 --timeout=30 https://mirrors.tuna.tsinghua.edu.cn/git/videolan/x264.git
           cd x264
           ./configure \
             --host=${TARGET_ARCH} \
             --cross-prefix=${TOOLCHAIN}/bin/llvm- \
             --sysroot=${TOOLCHAIN}/sysroot \
-            --prefix=$(pwd)/../build \
+            --prefix=${BUILD_DIR} \
             --enable-static \
             --enable-pic \
             --disable-cli \
@@ -70,16 +77,16 @@ jobs:
           make install
           cd ..
 
-      - name: 6. 编译x265（H.265编码）
+      - name: 6. 编译x265（H.265编码，Gitee国内镜像）
         run: |
-          git clone --depth 1 --retry 5 https://bitbucket.org/multicoreware/x265_git.git
+          git clone --depth 1 --retry 5 --timeout=30 https://gitee.com/mirrors_multicoreware/x265_git.git
           cd x265_git/build/linux
           cmake -G "Unix Makefiles" ../../source \
             -DCMAKE_SYSTEM_NAME=Android \
             -DCMAKE_ANDROID_API=${ANDROID_API} \
             -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
             -DCMAKE_ANDROID_NDK=${NDK_PATH} \
-            -DCMAKE_INSTALL_PREFIX=$(pwd)/../../../build \
+            -DCMAKE_INSTALL_PREFIX=${BUILD_DIR} \
             -DENABLE_SHARED=OFF \
             -DENABLE_CLI=OFF \
             -DENABLE_PIC=ON \
@@ -90,14 +97,14 @@ jobs:
           make install
           cd ../../..
 
-      - name: 7. 编译fdk-aac（高清音频编码）
+      - name: 7. 编译fdk-aac（高清音频编码，Gitee国内镜像）
         run: |
-          git clone --depth 1 --retry 5 https://github.com/mstorsjo/fdk-aac.git
+          git clone --depth 1 --retry 5 --timeout=30 https://gitee.com/mirrors/fdk-aac.git
           cd fdk-aac
           ./autogen.sh
           ./configure \
             --host=${TARGET_ARCH} \
-            --prefix=$(pwd)/../build \
+            --prefix=${BUILD_DIR} \
             --enable-static \
             --disable-shared \
             --with-pic=yes
@@ -105,14 +112,14 @@ jobs:
           make install
           cd ..
 
-      - name: 8. 编译openssl（网络/加密支持）
+      - name: 8. 编译openssl（网络/加密支持，清华镜像）
         run: |
-          wget -t 5 -O openssl.tar.gz https://www.openssl.org/source/openssl-3.3.2.tar.gz
+          wget -t 5 --timeout=30 -O openssl.tar.gz https://mirrors.tuna.tsinghua.edu.cn/openssl/source/openssl-3.3.2.tar.gz
           tar -zxf openssl.tar.gz
           cd openssl-3.3.2
           ./Configure android-arm64 \
             -D__ANDROID_API__=${ANDROID_API} \
-            --prefix=$(pwd)/../build \
+            --prefix=${BUILD_DIR} \
             --libdir=lib \
             no-shared \
             no-tests
@@ -120,9 +127,9 @@ jobs:
           make install_sw
           cd ..
 
-      - name: 9. 编译FFmpeg主程序（全功能集成）
+      - name: 9. 编译FFmpeg主程序（清华镜像，全功能集成）
         run: |
-          git clone --depth 1 --retry 5 https://git.ffmpeg.org/ffmpeg.git
+          git clone --depth 1 --retry 5 --timeout=30 https://mirrors.tuna.tsinghua.edu.cn/git/ffmpeg/ffmpeg.git
           cd ffmpeg
           ./configure \
             --prefix=${OUTPUT_DIR} \
@@ -155,8 +162,8 @@ jobs:
             --disable-doc \
             --disable-programs \
             --enable-ffmpeg \
-            --extra-cflags="-I$(pwd)/../build/include -fPIE -fPIC -O2" \
-            --extra-ldflags="-L$(pwd)/../build/lib -fPIE -pie" \
+            --extra-cflags="-I${BUILD_DIR}/include -fPIE -fPIC -O2" \
+            --extra-ldflags="-L${BUILD_DIR}/lib -fPIE -pie" \
             --extra-libs="-lm -ldl -llog"
           make -j4
           make install
