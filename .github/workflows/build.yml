@@ -17,34 +17,47 @@ jobs:
       
       - name: 3. 下载Android NDK（官方地址，云端极速下载）
         run: |
+          # 先定义当前shell可用的变量，同时写入全局环境变量
+          CURRENT_DIR=$(pwd)
+          NDK_PATH="${CURRENT_DIR}/android-ndk-r25c"
+          ANDROID_API=24
+          TARGET_ARCH=aarch64-linux-android
+          OUTPUT_DIR="${CURRENT_DIR}/output"
+          
+          # 下载并解压NDK
           wget -t 5 -O android-ndk-r25c-linux.zip https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
           unzip -q android-ndk-r25c-linux.zip
-          echo "NDK_PATH=$(pwd)/android-ndk-r25c" >> $GITHUB_ENV
-          echo "ANDROID_API=24" >> $GITHUB_ENV
-          echo "TARGET_ARCH=aarch64-linux-android" >> $GITHUB_ENV
-          echo "OUTPUT_DIR=$(pwd)/output" >> $GITHUB_ENV
-          mkdir -p $OUTPUT_DIR
+          
+          # 写入全局环境变量，给后续步骤使用
+          echo "NDK_PATH=${NDK_PATH}" >> $GITHUB_ENV
+          echo "ANDROID_API=${ANDROID_API}" >> $GITHUB_ENV
+          echo "TARGET_ARCH=${TARGET_ARCH}" >> $GITHUB_ENV
+          echo "OUTPUT_DIR=${OUTPUT_DIR}" >> $GITHUB_ENV
+          
+          # 创建输出目录，变量已在当前shell定义，不会为空
+          mkdir -p ${OUTPUT_DIR}
+          mkdir -p ${CURRENT_DIR}/build/lib/pkgconfig
+          echo "PKG_CONFIG_PATH=${CURRENT_DIR}/build/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: 4. 配置交叉编译工具链全局变量
         run: |
-          echo "TOOLCHAIN=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
-          echo "CC=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ env.TARGET_ARCH }}${{ env.ANDROID_API }}-clang" >> $GITHUB_ENV
-          echo "CXX=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ env.TARGET_ARCH }}${{ env.ANDROID_API }}-clang++" >> $GITHUB_ENV
-          echo "AR=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" >> $GITHUB_ENV
-          echo "LD=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/ld" >> $GITHUB_ENV
-          echo "RANLIB=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib" >> $GITHUB_ENV
-          echo "STRIP=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$(pwd)/build/lib/pkgconfig" >> $GITHUB_ENV
-          mkdir -p $(pwd)/build/lib/pkgconfig
+          TOOLCHAIN="${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64"
+          echo "TOOLCHAIN=${TOOLCHAIN}" >> $GITHUB_ENV
+          echo "CC=${TOOLCHAIN}/bin/${TARGET_ARCH}${ANDROID_API}-clang" >> $GITHUB_ENV
+          echo "CXX=${TOOLCHAIN}/bin/${TARGET_ARCH}${ANDROID_API}-clang++" >> $GITHUB_ENV
+          echo "AR=${TOOLCHAIN}/bin/llvm-ar" >> $GITHUB_ENV
+          echo "LD=${TOOLCHAIN}/bin/ld" >> $GITHUB_ENV
+          echo "RANLIB=${TOOLCHAIN}/bin/llvm-ranlib" >> $GITHUB_ENV
+          echo "STRIP=${TOOLCHAIN}/bin/llvm-strip" >> $GITHUB_ENV
 
       - name: 5. 编译x264（H.264编码）
         run: |
           git clone --depth 1 --retry 5 https://code.videolan.org/videolan/x264.git
           cd x264
           ./configure \
-            --host=${{ env.TARGET_ARCH }} \
-            --cross-prefix=${{ env.TOOLCHAIN }}/bin/llvm- \
-            --sysroot=${{ env.TOOLCHAIN }}/sysroot \
+            --host=${TARGET_ARCH} \
+            --cross-prefix=${TOOLCHAIN}/bin/llvm- \
+            --sysroot=${TOOLCHAIN}/sysroot \
             --prefix=$(pwd)/../build \
             --enable-static \
             --enable-pic \
@@ -63,9 +76,9 @@ jobs:
           cd x265_git/build/linux
           cmake -G "Unix Makefiles" ../../source \
             -DCMAKE_SYSTEM_NAME=Android \
-            -DCMAKE_ANDROID_API=${{ env.ANDROID_API }} \
+            -DCMAKE_ANDROID_API=${ANDROID_API} \
             -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
-            -DCMAKE_ANDROID_NDK=${{ env.NDK_PATH }} \
+            -DCMAKE_ANDROID_NDK=${NDK_PATH} \
             -DCMAKE_INSTALL_PREFIX=$(pwd)/../../../build \
             -DENABLE_SHARED=OFF \
             -DENABLE_CLI=OFF \
@@ -83,7 +96,7 @@ jobs:
           cd fdk-aac
           ./autogen.sh
           ./configure \
-            --host=${{ env.TARGET_ARCH }} \
+            --host=${TARGET_ARCH} \
             --prefix=$(pwd)/../build \
             --enable-static \
             --disable-shared \
@@ -98,7 +111,7 @@ jobs:
           tar -zxf openssl.tar.gz
           cd openssl-3.3.2
           ./Configure android-arm64 \
-            -D__ANDROID_API__=${{ env.ANDROID_API }} \
+            -D__ANDROID_API__=${ANDROID_API} \
             --prefix=$(pwd)/../build \
             --libdir=lib \
             no-shared \
@@ -111,20 +124,19 @@ jobs:
         run: |
           git clone --depth 1 --retry 5 https://git.ffmpeg.org/ffmpeg.git
           cd ffmpeg
-          export PKG_CONFIG_PATH=$(pwd)/../build/lib/pkgconfig
           ./configure \
-            --prefix=${{ env.OUTPUT_DIR }} \
+            --prefix=${OUTPUT_DIR} \
             --target-os=android \
             --arch=aarch64 \
             --cpu=armv8-a \
             --enable-cross-compile \
-            --cross-prefix=${{ env.TOOLCHAIN }}/bin/llvm- \
-            --sysroot=${{ env.TOOLCHAIN }}/sysroot \
-            --cc=${{ env.CC }} \
-            --cxx=${{ env.CXX }} \
-            --ar=${{ env.AR }} \
-            --ranlib=${{ env.RANLIB }} \
-            --strip=${{ env.STRIP }} \
+            --cross-prefix=${TOOLCHAIN}/bin/llvm- \
+            --sysroot=${TOOLCHAIN}/sysroot \
+            --cc=${CC} \
+            --cxx=${CXX} \
+            --ar=${AR} \
+            --ranlib=${RANLIB} \
+            --strip=${STRIP} \
             --enable-gpl \
             --enable-nonfree \
             --enable-version3 \
@@ -152,8 +164,8 @@ jobs:
 
       - name: 10. 打包精简成品
         run: |
-          cd ${{ env.OUTPUT_DIR }}
-          ${{ env.STRIP }} bin/ffmpeg
+          cd ${OUTPUT_DIR}
+          ${STRIP} bin/ffmpeg
           zip -r ffmpeg-arm64-android.zip bin/
           echo "编译完成！成品文件：ffmpeg-arm64-android.zip"
 
@@ -161,4 +173,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-arm64-android-成品
-          path: ${{ env.OUTPUT_DIR }}/ffmpeg-arm64-android.zip
+          path: ${OUTPUT_DIR}/ffmpeg-arm64-android.zip
