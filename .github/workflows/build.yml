@@ -1,4 +1,4 @@
-name: 全清华镜像FFmpeg自动编译
+name: FFmpeg安卓全功能自动编译
 on:
   push:
     branches: [ main ]
@@ -10,30 +10,22 @@ jobs:
       - name: 1. 检出代码
         uses: actions/checkout@v4
 
-      - name: 2. 替换系统源为清华镜像，安装基础依赖
+      - name: 2. 安装系统基础依赖
         run: |
-          sudo sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
-          sudo sed -i "s@http://.*security.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
           sudo apt update -y
           sudo apt install -y wget curl git make cmake ninja-build pkg-config python3 python3-pip unzip autoconf automake libtool
-          # pip换清华源
-          pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
-
-      - name: 3. 官方原生安装Android NDK（彻底解决下载404问题）
-        uses: actions/setup-ndk@v4
-        with:
-          ndk-version: r25c
-          local-cache: true
-
-      - name: 4. 设置交叉编译环境变量
+      
+      - name: 3. 下载Android NDK（官方地址，云端极速下载）
         run: |
-          echo "NDK_PATH=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+          wget -t 5 -O android-ndk-r25c-linux.zip https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+          unzip -q android-ndk-r25c-linux.zip
+          echo "NDK_PATH=$(pwd)/android-ndk-r25c" >> $GITHUB_ENV
           echo "ANDROID_API=24" >> $GITHUB_ENV
           echo "TARGET_ARCH=aarch64-linux-android" >> $GITHUB_ENV
           echo "OUTPUT_DIR=$(pwd)/output" >> $GITHUB_ENV
           mkdir -p $OUTPUT_DIR
 
-      - name: 5. 配置交叉编译工具链全局变量
+      - name: 4. 配置交叉编译工具链全局变量
         run: |
           echo "TOOLCHAIN=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
           echo "CC=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ env.TARGET_ARCH }}${{ env.ANDROID_API }}-clang" >> $GITHUB_ENV
@@ -45,9 +37,9 @@ jobs:
           echo "PKG_CONFIG_PATH=$(pwd)/build/lib/pkgconfig" >> $GITHUB_ENV
           mkdir -p $(pwd)/build/lib/pkgconfig
 
-      - name: 6. 编译x264（H.264编码，清华镜像）
+      - name: 5. 编译x264（H.264编码）
         run: |
-          git clone --depth 1 --retry 5 https://mirrors.tuna.tsinghua.edu.cn/git/videolan/x264.git
+          git clone --depth 1 --retry 5 https://code.videolan.org/videolan/x264.git
           cd x264
           ./configure \
             --host=${{ env.TARGET_ARCH }} \
@@ -65,10 +57,10 @@ jobs:
           make install
           cd ..
 
-      - name: 7. 编译x265（H.265编码，清华镜像）
+      - name: 6. 编译x265（H.265编码）
         run: |
-          git clone --depth 1 --retry 5 https://mirrors.tuna.tsinghua.edu.cn/git/videolan/x265.git
-          cd x265/build/linux
+          git clone --depth 1 --retry 5 https://bitbucket.org/multicoreware/x265_git.git
+          cd x265_git/build/linux
           cmake -G "Unix Makefiles" ../../source \
             -DCMAKE_SYSTEM_NAME=Android \
             -DCMAKE_ANDROID_API=${{ env.ANDROID_API }} \
@@ -85,9 +77,9 @@ jobs:
           make install
           cd ../../..
 
-      - name: 8. 编译fdk-aac（音频编码，清华镜像）
+      - name: 7. 编译fdk-aac（高清音频编码）
         run: |
-          git clone --depth 1 --retry 5 https://mirrors.tuna.tsinghua.edu.cn/git/mpeg-audio/fdk-aac.git
+          git clone --depth 1 --retry 5 https://github.com/mstorsjo/fdk-aac.git
           cd fdk-aac
           ./autogen.sh
           ./configure \
@@ -100,9 +92,9 @@ jobs:
           make install
           cd ..
 
-      - name: 9. 编译openssl（网络/加密支持，清华镜像）
+      - name: 8. 编译openssl（网络/加密支持）
         run: |
-          wget -t 5 -O openssl.tar.gz https://mirrors.tuna.tsinghua.edu.cn/openssl/source/openssl-3.3.2.tar.gz
+          wget -t 5 -O openssl.tar.gz https://www.openssl.org/source/openssl-3.3.2.tar.gz
           tar -zxf openssl.tar.gz
           cd openssl-3.3.2
           ./Configure android-arm64 \
@@ -115,9 +107,9 @@ jobs:
           make install_sw
           cd ..
 
-      - name: 10. 编译FFmpeg主程序（清华镜像，全功能集成）
+      - name: 9. 编译FFmpeg主程序（全功能集成）
         run: |
-          git clone --depth 1 --retry 5 https://mirrors.tuna.tsinghua.edu.cn/git/ffmpeg/ffmpeg.git
+          git clone --depth 1 --retry 5 https://git.ffmpeg.org/ffmpeg.git
           cd ffmpeg
           export PKG_CONFIG_PATH=$(pwd)/../build/lib/pkgconfig
           ./configure \
@@ -158,14 +150,14 @@ jobs:
           make install
           cd ..
 
-      - name: 11. 打包成品，准备导出
+      - name: 10. 打包精简成品
         run: |
           cd ${{ env.OUTPUT_DIR }}
           ${{ env.STRIP }} bin/ffmpeg
           zip -r ffmpeg-arm64-android.zip bin/
           echo "编译完成！成品文件：ffmpeg-arm64-android.zip"
 
-      - name: 12. 上传编译成品（自动导出，可直接下载）
+      - name: 11. 上传编译成品（可直接下载）
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-arm64-android-成品
