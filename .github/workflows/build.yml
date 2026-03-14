@@ -81,12 +81,12 @@ jobs:
           make install
           cd ..
 
-      - name: 6. 编译x265（H.265编码，源码包直下，无git依赖）
+      - name: 6. 编译x265（H.265编码，Gitee国内镜像，解决404问题）
         run: |
-          # 下载源码压缩包，解压
-          wget -t 5 --timeout=30 -O x265.tar.gz https://bitbucket.org/multicoreware/x265_git/get/master.tar.gz
+          # 下载Gitee国内镜像源码包，解压
+          wget -t 5 --timeout=30 -O x265.tar.gz https://gitee.com/mirrors_multicoreware/x265_git/repository/archive/master.tar.gz
           tar -zxf x265.tar.gz
-          cd multicoreware-x265_git-*/build/linux
+          cd x265_git-master/build/linux
           
           # 配置并编译
           cmake -G "Unix Makefiles" ../../source \
@@ -105,7 +105,7 @@ jobs:
           make install
           cd ../../..
 
-      - name: 7. 编译fdk-aac（高清音频编码，源码包直下，无git依赖）
+      - name: 7. 编译fdk-aac（高清音频编码，稳定版源码包）
         run: |
           # 下载稳定版源码包，解压
           wget -t 5 --timeout=30 -O fdk-aac.tar.gz https://github.com/mstorsjo/fdk-aac/archive/refs/tags/v2.0.3.tar.gz
@@ -147,7 +147,7 @@ jobs:
           # 下载FFmpeg源码包，解压
           wget -t 5 --timeout=30 -O ffmpeg.tar.bz2 https://mirrors.tuna.tsinghua.edu.cn/ffmpeg/releases/ffmpeg-snapshot.tar.bz2
           tar -jxf ffmpeg.tar.bz2
-          cd ffmpeg-*
+          cd ffmpeg
           
           # 全功能配置编译
           ./configure \
