@@ -15,15 +15,15 @@ jobs:
           sudo sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
           sudo sed -i "s@http://.*security.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
           sudo apt update -y
-          sudo apt install -y wget curl git make cmake ninja-build pkg-config python3 python3-pip unzip
+          sudo apt install -y wget curl git make cmake ninja-build pkg-config python3 python3-pip unzip autoconf automake libtool
           # pip换清华源
           pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
-      - name: 3. 下载Android NDK（清华镜像，交叉编译手机用的arm64程序）
+      - name: 3. 下载Android NDK（清华镜像稳定版，修复404问题）
         run: |
-          wget -O android-ndk-r26b-linux.zip https://mirrors.tuna.tsinghua.edu.cn/Android/ndk/android-ndk-r26b-linux.zip
-          unzip -q android-ndk-r26b-linux.zip
-          echo "NDK_PATH=$(pwd)/android-ndk-r26b" >> $GITHUB_ENV
+          wget -t 5 -O android-ndk-r25c-linux.zip https://mirrors.tuna.tsinghua.edu.cn/Android/ndk/android-ndk-r25c-linux.zip
+          unzip -q android-ndk-r25c-linux.zip
+          echo "NDK_PATH=$(pwd)/android-ndk-r25c" >> $GITHUB_ENV
           echo "ANDROID_API=24" >> $GITHUB_ENV
           echo "TARGET_ARCH=aarch64-linux-android" >> $GITHUB_ENV
           echo "OUTPUT_DIR=$(pwd)/output" >> $GITHUB_ENV
@@ -43,7 +43,7 @@ jobs:
 
       - name: 5. 编译x264（H.264编码，清华镜像）
         run: |
-          git clone --depth 1 https://mirrors.tuna.tsinghua.edu.cn/git/videolan/x264.git
+          git clone --depth 1 --retry 5 https://mirrors.tuna.tsinghua.edu.cn/git/videolan/x264.git
           cd x264
           ./configure \
             --host=${{ env.TARGET_ARCH }} \
@@ -57,13 +57,13 @@ jobs:
             --disable-interlaced \
             --bit-depth=8 \
             --chroma-format=420
-          make -j$(nproc)
+          make -j4
           make install
           cd ..
 
       - name: 6. 编译x265（H.265编码，清华镜像）
         run: |
-          git clone --depth 1 https://mirrors.tuna.tsinghua.edu.cn/git/videolan/x265.git
+          git clone --depth 1 --retry 5 https://mirrors.tuna.tsinghua.edu.cn/git/videolan/x265.git
           cd x265/build/linux
           cmake -G "Unix Makefiles" ../../source \
             -DCMAKE_SYSTEM_NAME=Android \
@@ -77,13 +77,13 @@ jobs:
             -DHIGH_BIT_DEPTH=OFF \
             -DMAIN12=OFF \
             -DMAIN10=ON
-          make -j$(nproc)
+          make -j4
           make install
           cd ../../..
 
       - name: 7. 编译fdk-aac（音频编码，清华镜像）
         run: |
-          git clone --depth 1 https://mirrors.tuna.tsinghua.edu.cn/git/mpeg-audio/fdk-aac.git
+          git clone --depth 1 --retry 5 https://mirrors.tuna.tsinghua.edu.cn/git/mpeg-audio/fdk-aac.git
           cd fdk-aac
           ./autogen.sh
           ./configure \
@@ -92,13 +92,13 @@ jobs:
             --enable-static \
             --disable-shared \
             --with-pic=yes
-          make -j$(nproc)
+          make -j4
           make install
           cd ..
 
       - name: 8. 编译openssl（网络/加密支持，清华镜像）
         run: |
-          wget -O openssl.tar.gz https://mirrors.tuna.tsinghua.edu.cn/openssl/source/openssl-3.3.2.tar.gz
+          wget -t 5 -O openssl.tar.gz https://mirrors.tuna.tsinghua.edu.cn/openssl/source/openssl-3.3.2.tar.gz
           tar -zxf openssl.tar.gz
           cd openssl-3.3.2
           ./Configure android-arm64 \
@@ -107,13 +107,13 @@ jobs:
             --libdir=lib \
             no-shared \
             no-tests
-          make -j$(nproc)
+          make -j4
           make install_sw
           cd ..
 
       - name: 9. 编译FFmpeg主程序（清华镜像，全功能集成）
         run: |
-          git clone --depth 1 https://mirrors.tuna.tsinghua.edu.cn/git/ffmpeg/ffmpeg.git
+          git clone --depth 1 --retry 5 https://mirrors.tuna.tsinghua.edu.cn/git/ffmpeg/ffmpeg.git
           cd ffmpeg
           export PKG_CONFIG_PATH=$(pwd)/../build/lib/pkgconfig
           ./configure \
@@ -150,7 +150,6 @@ jobs:
             --extra-cflags="-I$(pwd)/../build/include -fPIE -fPIC -O2" \
             --extra-ldflags="-L$(pwd)/../build/lib -fPIE -pie" \
             --extra-libs="-lm -ldl -llog"
-          # 限制线程数，避免云端编译进程被杀
           make -j4
           make install
           cd ..
