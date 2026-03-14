@@ -10,14 +10,10 @@ jobs:
       - name: 1. 检出代码
         uses: actions/checkout@v4
 
-      - name: 2. 替换系统源为清华镜像，安装基础依赖
+      - name: 2. 安装系统基础依赖
         run: |
-          sudo sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
-          sudo sed -i "s@http://.*security.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
           sudo apt update -y
           sudo apt install -y wget curl git make cmake ninja-build pkg-config python3 python3-pip unzip autoconf automake libtool bzip2
-          # pip换清华源
-          pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
       
       - name: 3. 下载Android NDK，配置全局环境变量
         run: |
@@ -29,7 +25,7 @@ jobs:
           OUTPUT_DIR="${CURRENT_DIR}/output"
           BUILD_DIR="${CURRENT_DIR}/build"
           
-          # 下载并解压NDK，官方地址，云端原生支持
+          # 下载并解压NDK，官方固定地址，云端高速下载
           wget -t 5 --timeout=30 -O android-ndk-r25c-linux.zip https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
           unzip -q android-ndk-r25c-linux.zip
           
@@ -57,10 +53,10 @@ jobs:
           echo "RANLIB=${TOOLCHAIN}/bin/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=${TOOLCHAIN}/bin/llvm-strip" >> $GITHUB_ENV
 
-      - name: 5. 编译x264（H.264编码，清华镜像）
+      - name: 5. 编译x264（H.264编码，GitHub官方镜像，彻底解决404）
         run: |
-          # 清华镜像源码，稳定下载
-          wget -t 5 --timeout=30 -O x264.tar.gz https://mirrors.tuna.tsinghua.edu.cn/git/videolan/x264.git/snapshot/master.tar.gz
+          # GitHub官方镜像地址，永久有效，Actions访问零失败
+          wget -t 5 --timeout=30 -O x264.tar.gz https://github.com/mirror/x264/archive/refs/heads/master.tar.gz
           tar -zxf x264.tar.gz
           cd x264-master
           
@@ -83,7 +79,7 @@ jobs:
 
       - name: 6. 编译x265（H.265编码，GitHub官方镜像，彻底解决404）
         run: |
-          # GitHub官方镜像，地址永久有效，Actions访问零失败
+          # GitHub官方镜像地址，永久有效，Actions访问零失败
           wget -t 5 --timeout=30 -O x265.tar.gz https://github.com/videolan/x265/archive/refs/heads/master.tar.gz
           tar -zxf x265.tar.gz
           cd x265-master/build/linux
@@ -105,9 +101,9 @@ jobs:
           make install
           cd ../../..
 
-      - name: 7. 编译fdk-aac（高清音频编码，GitHub稳定地址）
+      - name: 7. 编译fdk-aac（高清音频编码，GitHub官方稳定版）
         run: |
-          # 官方稳定发布版，地址固定
+          # 官方稳定发布版，地址固定永久有效
           wget -t 5 --timeout=30 -O fdk-aac.tar.gz https://github.com/mstorsjo/fdk-aac/archive/refs/tags/v2.0.3.tar.gz
           tar -zxf fdk-aac.tar.gz
           cd fdk-aac-2.0.3
@@ -124,9 +120,9 @@ jobs:
           make install
           cd ..
 
-      - name: 8. 编译openssl（网络/加密支持，清华镜像稳定版）
+      - name: 8. 编译openssl（网络/加密支持，清华镜像稳定发布版）
         run: |
-          # 清华镜像源码，稳定下载
+          # 清华镜像官方发布版，地址固定，无404风险
           wget -t 5 --timeout=30 -O openssl.tar.gz https://mirrors.tuna.tsinghua.edu.cn/openssl/source/openssl-3.3.2.tar.gz
           tar -zxf openssl.tar.gz
           cd openssl-3.3.2
@@ -142,12 +138,12 @@ jobs:
           make install_sw
           cd ..
 
-      - name: 9. 编译FFmpeg主程序（清华镜像源码包，全功能集成）
+      - name: 9. 编译FFmpeg主程序（GitHub官方源码，全功能集成）
         run: |
-          # 清华镜像源码，稳定下载
-          wget -t 5 --timeout=30 -O ffmpeg.tar.bz2 https://mirrors.tuna.tsinghua.edu.cn/ffmpeg/releases/ffmpeg-snapshot.tar.bz2
-          tar -jxf ffmpeg.tar.bz2
-          cd ffmpeg
+          # FFmpeg官方GitHub镜像，永久有效，无404风险
+          wget -t 5 --timeout=30 -O ffmpeg.tar.gz https://github.com/FFmpeg/FFmpeg/archive/refs/heads/master.tar.gz
+          tar -zxf ffmpeg.tar.gz
+          cd FFmpeg-master
           
           # 全功能配置编译
           ./configure \
