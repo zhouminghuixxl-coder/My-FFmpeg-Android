@@ -1,43 +1,169 @@
-name: Build Full FFmpeg Android Binary
-
+name: 全清华镜像FFmpeg自动编译
 on:
-  workflow_dispatch:
-
+  push:
+    branches: [ main ]
+  workflow_dispatch: # 支持手动触发编译
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. 拉取最强 Android 编译脚本
+      - name: 1. 检出代码
         uses: actions/checkout@v4
-        with:
-          repository: Javernaut/ffmpeg-android-maker
-          ref: master
 
-      - name: 2. 配置 NDK (Android 底层开发工具包)
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r26b
-
-      - name: 3. 火力全开：编译依赖库并生成 ffmpeg
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          # 【修复1】补充 SDK 环境变量，这是脚本运行必须的
-          ANDROID_SDK_HOME: ${{ env.ANDROID_HOME }}
-          EXTRA_BUILD_CONFIGURATION_FLAGS: "--enable-ffmpeg --enable-gpl --enable-nonfree --enable-static --disable-shared"
+      - name: 2. 替换系统源为清华镜像，安装基础依赖
         run: |
-          chmod +x ffmpeg-android-maker.sh
-          
-          # 【修复2和3】修改了架构参数为 -abis，去掉了原版脚本不支持的 fdk-aac
-          ./ffmpeg-android-maker.sh -android=24 -abis=arm64-v8a -x264 -x265 -vpx -opus -mp3lame
+          sudo sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
+          sudo sed -i "s@http://.*security.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list
+          sudo apt update -y
+          sudo apt install -y wget curl git make cmake ninja-build pkg-config python3 python3-pip unzip
+          # pip换清华源
+          pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
-      - name: 4. 提取生成的二进制文件
+      - name: 3. 下载Android NDK（清华镜像，交叉编译手机用的arm64程序）
         run: |
-          mkdir -p release_bin
-          find build -name "ffmpeg" -type f -executable -exec cp {} release_bin/ \;
+          wget -O android-ndk-r26b-linux.zip https://mirrors.tuna.tsinghua.edu.cn/Android/ndk/android-ndk-r26b-linux.zip
+          unzip -q android-ndk-r26b-linux.zip
+          echo "NDK_PATH=$(pwd)/android-ndk-r26b" >> $GITHUB_ENV
+          echo "ANDROID_API=24" >> $GITHUB_ENV
+          echo "TARGET_ARCH=aarch64-linux-android" >> $GITHUB_ENV
+          echo "OUTPUT_DIR=$(pwd)/output" >> $GITHUB_ENV
+          mkdir -p $OUTPUT_DIR
 
-      - name: 5. 上传产物供你下载
+      - name: 4. 设置交叉编译环境变量
+        run: |
+          echo "TOOLCHAIN=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
+          echo "CC=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ env.TARGET_ARCH }}${{ env.ANDROID_API }}-clang" >> $GITHUB_ENV
+          echo "CXX=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ env.TARGET_ARCH }}${{ env.ANDROID_API }}-clang++" >> $GITHUB_ENV
+          echo "AR=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" >> $GITHUB_ENV
+          echo "LD=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/ld" >> $GITHUB_ENV
+          echo "RANLIB=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib" >> $GITHUB_ENV
+          echo "STRIP=${{ env.NDK_PATH }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$(pwd)/build/lib/pkgconfig" >> $GITHUB_ENV
+          mkdir -p $(pwd)/build/lib/pkgconfig
+
+      - name: 5. 编译x264（H.264编码，清华镜像）
+        run: |
+          git clone --depth 1 https://mirrors.tuna.tsinghua.edu.cn/git/videolan/x264.git
+          cd x264
+          ./configure \
+            --host=${{ env.TARGET_ARCH }} \
+            --cross-prefix=${{ env.TOOLCHAIN }}/bin/llvm- \
+            --sysroot=${{ env.TOOLCHAIN }}/sysroot \
+            --prefix=$(pwd)/../build \
+            --enable-static \
+            --enable-pic \
+            --disable-cli \
+            --disable-opencl \
+            --disable-interlaced \
+            --bit-depth=8 \
+            --chroma-format=420
+          make -j$(nproc)
+          make install
+          cd ..
+
+      - name: 6. 编译x265（H.265编码，清华镜像）
+        run: |
+          git clone --depth 1 https://mirrors.tuna.tsinghua.edu.cn/git/videolan/x265.git
+          cd x265/build/linux
+          cmake -G "Unix Makefiles" ../../source \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DCMAKE_ANDROID_API=${{ env.ANDROID_API }} \
+            -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
+            -DCMAKE_ANDROID_NDK=${{ env.NDK_PATH }} \
+            -DCMAKE_INSTALL_PREFIX=$(pwd)/../../../build \
+            -DENABLE_SHARED=OFF \
+            -DENABLE_CLI=OFF \
+            -DENABLE_PIC=ON \
+            -DHIGH_BIT_DEPTH=OFF \
+            -DMAIN12=OFF \
+            -DMAIN10=ON
+          make -j$(nproc)
+          make install
+          cd ../../..
+
+      - name: 7. 编译fdk-aac（音频编码，清华镜像）
+        run: |
+          git clone --depth 1 https://mirrors.tuna.tsinghua.edu.cn/git/mpeg-audio/fdk-aac.git
+          cd fdk-aac
+          ./autogen.sh
+          ./configure \
+            --host=${{ env.TARGET_ARCH }} \
+            --prefix=$(pwd)/../build \
+            --enable-static \
+            --disable-shared \
+            --with-pic=yes
+          make -j$(nproc)
+          make install
+          cd ..
+
+      - name: 8. 编译openssl（网络/加密支持，清华镜像）
+        run: |
+          wget -O openssl.tar.gz https://mirrors.tuna.tsinghua.edu.cn/openssl/source/openssl-3.3.2.tar.gz
+          tar -zxf openssl.tar.gz
+          cd openssl-3.3.2
+          ./Configure android-arm64 \
+            -D__ANDROID_API__=${{ env.ANDROID_API }} \
+            --prefix=$(pwd)/../build \
+            --libdir=lib \
+            no-shared \
+            no-tests
+          make -j$(nproc)
+          make install_sw
+          cd ..
+
+      - name: 9. 编译FFmpeg主程序（清华镜像，全功能集成）
+        run: |
+          git clone --depth 1 https://mirrors.tuna.tsinghua.edu.cn/git/ffmpeg/ffmpeg.git
+          cd ffmpeg
+          export PKG_CONFIG_PATH=$(pwd)/../build/lib/pkgconfig
+          ./configure \
+            --prefix=${{ env.OUTPUT_DIR }} \
+            --target-os=android \
+            --arch=aarch64 \
+            --cpu=armv8-a \
+            --enable-cross-compile \
+            --cross-prefix=${{ env.TOOLCHAIN }}/bin/llvm- \
+            --sysroot=${{ env.TOOLCHAIN }}/sysroot \
+            --cc=${{ env.CC }} \
+            --cxx=${{ env.CXX }} \
+            --ar=${{ env.AR }} \
+            --ranlib=${{ env.RANLIB }} \
+            --strip=${{ env.STRIP }} \
+            --enable-gpl \
+            --enable-nonfree \
+            --enable-version3 \
+            --enable-static \
+            --disable-shared \
+            --enable-small \
+            --enable-pic \
+            --enable-libx264 \
+            --enable-libx265 \
+            --enable-libfdk-aac \
+            --enable-openssl \
+            --enable-neon \
+            --enable-hwaccels \
+            --enable-mediacodec \
+            --enable-jni \
+            --disable-doc \
+            --disable-programs \
+            --enable-ffmpeg \
+            --extra-cflags="-I$(pwd)/../build/include -fPIE -fPIC -O2" \
+            --extra-ldflags="-L$(pwd)/../build/lib -fPIE -pie" \
+            --extra-libs="-lm -ldl -llog"
+          # 限制线程数，避免云端编译进程被杀
+          make -j4
+          make install
+          cd ..
+
+      - name: 10. 打包成品，准备导出
+        run: |
+          cd ${{ env.OUTPUT_DIR }}
+          ${{ env.STRIP }} bin/ffmpeg
+          zip -r ffmpeg-arm64-android.zip bin/
+          echo "编译完成！成品文件：ffmpeg-arm64-android.zip"
+
+      - name: 11. 上传编译成品（自动导出，可直接下载）
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-android-arm64
-          path: release_bin/
+          name: ffmpeg-arm64-android-成品
+          path: ${{ env.OUTPUT_DIR }}/ffmpeg-arm64-android.zip
