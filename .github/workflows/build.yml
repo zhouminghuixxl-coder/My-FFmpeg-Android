@@ -1,146 +1,91 @@
-name: FFmpeg安卓全功能编译（无x265/无fdk-aac）
+name: Build FFmpeg for Android (arm64)
+
 on:
+  workflow_dispatch:        # 手动触发
   push:
-    branches: [ main ]
-  workflow_dispatch: # 手动触发编译
+    branches: [ main ]      # 也可以设置自动触发
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. 检出代码
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. 安装系统基础依赖
-        run: |
-          sudo apt update -y
-          sudo apt install -y wget curl git make cmake ninja-build pkg-config python3 python3-pip unzip autoconf automake libtool bzip2
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-      - name: 3. 下载Android NDK，配置全局环境变量
+      - name: Download Android NDK
         run: |
-          # 定义全局路径变量
-          CURRENT_DIR=$(pwd)
-          NDK_PATH="${CURRENT_DIR}/android-ndk-r25c"
-          ANDROID_API=24
-          TARGET_ARCH=aarch64-linux-android
-          OUTPUT_DIR="${CURRENT_DIR}/output"
-          BUILD_DIR="${CURRENT_DIR}/build"
-          
-          # 下载并解压NDK（官方固定地址，绝对稳定）
-          wget -t 10 --timeout=60 -O android-ndk-r25c-linux.zip https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+          wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
           unzip -q android-ndk-r25c-linux.zip
-          
-          # 写入全局环境变量
-          echo "CURRENT_DIR=${CURRENT_DIR}" >> $GITHUB_ENV
-          echo "NDK_PATH=${NDK_PATH}" >> $GITHUB_ENV
-          echo "ANDROID_API=${ANDROID_API}" >> $GITHUB_ENV
-          echo "TARGET_ARCH=${TARGET_ARCH}" >> $GITHUB_ENV
-          echo "OUTPUT_DIR=${OUTPUT_DIR}" >> $GITHUB_ENV
-          echo "BUILD_DIR=${BUILD_DIR}" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=${BUILD_DIR}/lib/pkgconfig" >> $GITHUB_ENV
-          
-          # 提前创建目录
-          mkdir -p ${OUTPUT_DIR}
-          mkdir -p ${BUILD_DIR}/lib/pkgconfig
+          echo "NDK_PATH=$PWD/android-ndk-r25c" >> $GITHUB_ENV
 
-      - name: 4. 配置交叉编译工具链变量
+      - name: Download FFmpeg source
         run: |
-          TOOLCHAIN="${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64"
-          echo "TOOLCHAIN=${TOOLCHAIN}" >> $GITHUB_ENV
-          echo "CC=${TOOLCHAIN}/bin/${TARGET_ARCH}${ANDROID_API}-clang" >> $GITHUB_ENV
-          echo "CXX=${TOOLCHAIN}/bin/${TARGET_ARCH}${ANDROID_API}-clang++" >> $GITHUB_ENV
-          echo "AR=${TOOLCHAIN}/bin/llvm-ar" >> $GITHUB_ENV
-          echo "LD=${TOOLCHAIN}/bin/ld" >> $GITHUB_ENV
-          echo "RANLIB=${TOOLCHAIN}/bin/llvm-ranlib" >> $GITHUB_ENV
-          echo "STRIP=${TOOLCHAIN}/bin/llvm-strip" >> $GITHUB_ENV
+          git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg_src
+          cd ffmpeg_src
+          git checkout n7.0          # 选择稳定版本，也可用 master
 
-      - name: 5. 编译x264（H.264编码，GitHub官方镜像）
+      - name: Configure and build FFmpeg
         run: |
-          wget -t 10 --timeout=60 -O x264.tar.gz https://github.com/mirror/x264/archive/refs/heads/master.tar.gz
-          tar -zxf x264.tar.gz
-          cd x264-master
-          
+          export PATH=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+          cd ffmpeg_src
+
+          # 设置编译工具链
+          export AR=llvm-ar
+          export CC=aarch64-linux-android21-clang
+          export AS=$CC
+          export CXX=aarch64-linux-android21-clang++
+          export LD=ld
+          export RANLIB=llvm-ranlib
+          export STRIP=llvm-strip
+
+          # 配置编译选项（全功能静态版本）
           ./configure \
-            --host=${TARGET_ARCH} \
-            --cross-prefix=${TOOLCHAIN}/bin/llvm- \
-            --sysroot=${TOOLCHAIN}/sysroot \
-            --prefix=${BUILD_DIR} \
-            --enable-static \
-            --enable-pic \
-            --disable-cli \
-            --disable-opencl \
-            --disable-interlaced \
-            --bit-depth=8 \
-            --chroma-format=420
-          make -j4
-          make install
-          cd ..
-
-      - name: 6. 编译openssl（网络/加密支持，清华镜像稳定版）
-        run: |
-          wget -t 10 --timeout=60 -O openssl.tar.gz https://mirrors.tuna.tsinghua.edu.cn/openssl/source/openssl-3.3.2.tar.gz
-          tar -zxf openssl.tar.gz
-          cd openssl-3.3.2
-          
-          ./Configure android-arm64 \
-            -D__ANDROID_API__=${ANDROID_API} \
-            --prefix=${BUILD_DIR} \
-            --libdir=lib \
-            no-shared \
-            no-tests
-          make -j4
-          make install_sw
-          cd ..
-
-      - name: 7. 编译FFmpeg主程序（全功能，已移除x265/fdk-aac）
-        run: |
-          wget -t 10 --timeout=60 -O ffmpeg.tar.gz https://github.com/FFmpeg/FFmpeg/archive/refs/heads/master.tar.gz
-          tar -zxf ffmpeg.tar.gz
-          cd FFmpeg-master
-          
-          ./configure \
-            --prefix=${OUTPUT_DIR} \
             --target-os=android \
-            --arch=aarch64 \
-            --cpu=armv8-a \
+            --arch=arm64 \
+            --cross-prefix=aarch64-linux-android- \
+            --cc=$CC \
+            --cxx=$CXX \
+            --ar=$AR \
+            --ranlib=$RANLIB \
+            --strip=$STRIP \
             --enable-cross-compile \
-            --cross-prefix=${TOOLCHAIN}/bin/llvm- \
-            --sysroot=${TOOLCHAIN}/sysroot \
-            --cc=${CC} \
-            --cxx=${CXX} \
-            --ar=${AR} \
-            --ranlib=${RANLIB} \
-            --strip=${STRIP} \
-            --enable-gpl \
-            --enable-version3 \
-            --enable-static \
-            --disable-shared \
-            --enable-small \
-            --enable-pic \
-            --enable-libx264 \
-            --enable-openssl \
-            --enable-neon \
-            --enable-hwaccels \
-            --enable-mediacodec \
-            --enable-jni \
+            --sysroot=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/sysroot \
+            --disable-asm \
             --disable-doc \
+            --disable-debug \
             --disable-programs \
             --enable-ffmpeg \
-            --extra-cflags="-I${BUILD_DIR}/include -fPIE -fPIC -O2" \
-            --extra-ldflags="-L${BUILD_DIR}/lib -fPIE -pie" \
-            --extra-libs="-lm -ldl -llog"
-          make -j4
+            --enable-static \
+            --disable-shared \
+            --enable-gpl \
+            --enable-nonfree \
+            --enable-libx264 \
+            --enable-libx265 \
+            --enable-libmp3lame \
+            --enable-libvorbis \
+            --enable-libopus \
+            --enable-libvpx \
+            --enable-libaom \
+            --enable-libdav1d \
+            --enable-jni \
+            --enable-mediacodec \
+            --enable-pthreads \
+            --enable-version3 \
+            --extra-cflags="-fPIC -DANDROID" \
+            --extra-ldflags="-Wl,-z,stack-size=2097152"
+
+          # 编译（使用所有 CPU 核心）
+          make -j$(nproc)
           make install
-          cd ..
 
-      - name: 8. 打包精简成品
-        run: |
-          cd ${OUTPUT_DIR}
-          ${STRIP} bin/ffmpeg
-          zip -r ffmpeg-arm64-android.zip bin/
-          echo "编译完成！成品文件：ffmpeg-arm64-android.zip"
-
-      - name: 9. 上传编译成品（可直接下载）
+      - name: Upload FFmpeg binary
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-arm64-android-成品
-          path: ${OUTPUT_DIR}/ffmpeg-arm64-android.zip
+          name: ffmpeg-android-arm64
+          path: ffmpeg_src/ffmpeg
